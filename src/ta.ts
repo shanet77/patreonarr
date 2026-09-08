@@ -5,7 +5,9 @@ export async function pushToTA(ids: string[]): Promise<void> {
     console.log(`TA not configured, skipping push of ${ids.length} video(s)`);
     return;
   }
-  const res = await fetch(`${host}/api/download/?autostart=true`, {
+  // ponytail: query param only, no new abstraction until a second flag needs it
+  const autostart = process.env.TA_AUTOSTART !== "false";
+  const res = await fetch(`${host}/api/download/?autostart=${autostart}`, {
     method: "POST",
     headers: {
       Authorization: `Token ${token}`,

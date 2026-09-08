@@ -44,6 +44,27 @@ test("posts ids to TA download endpoint", async () => {
   assert.equal((init.headers as Record<string, string>).Authorization, "Token tok");
 });
 
+test("passes autostart=false when TA_AUTOSTART is false", async () => {
+  process.env.TA_HOST = "https://ta.example";
+  process.env.TA_API_TOKEN = "tok";
+  process.env.TA_AUTOSTART = "false";
+  let url = "";
+  const orig = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    url = String(input);
+    return new Response("ok", { status: 200 });
+  };
+  try {
+    await pushToTA(["dQw4w9WgXcQ"]);
+  } finally {
+    globalThis.fetch = orig;
+    delete process.env.TA_HOST;
+    delete process.env.TA_API_TOKEN;
+    delete process.env.TA_AUTOSTART;
+  }
+  assert.equal(url, "https://ta.example/api/download/?autostart=false");
+});
+
 test("throws on TA error response", async () => {
   process.env.TA_HOST = "https://ta.example";
   process.env.TA_API_TOKEN = "tok";
