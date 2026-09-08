@@ -1,0 +1,43 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>patreonarr bridge</title>
+<style>
+  body { font: 14px system-ui; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+  input[type=text] { width: 70%; padding: .4rem; }
+  button { padding: .4rem .8rem; }
+  li { margin: .3rem 0; }
+</style>
+<h1>patreonarr bridge</h1>
+<h2>cookies</h2>
+<textarea id="cookies" rows="4" cols="80" placeholder="paste cookies.txt content"></textarea><br>
+<button onclick="saveCookies()">save cookies</button>
+<h2>creators</h2>
+<input type="text" id="url" placeholder="https://www.patreon.com/c/<vanity>/posts">
+<button onclick="add()">add</button>
+<button onclick="poll()">poll now</button>
+<ul id="list"></ul>
+<h2>recent posts</h2>
+<ul id="seen"></ul>
+<script>
+  const j = (m, u, b) => fetch(u, { method: m, body: b }).then(r => r.json());
+  async function refresh() {
+    const c = await fetch('/api/creators').then(r => r.json());
+    document.getElementById('list').innerHTML = c.map(x =>
+      `<li>${x.url} <button onclick="del('${x.url}')">remove</button></li>`).join('');
+    const s = await fetch('/api/seen').then(r => r.json());
+    document.getElementById('seen').innerHTML = s.map(x =>
+      `<li>${x.title || x.post_id} — ${x.yt_ids.length} video(s)</li>`).join('');
+  }
+  async function add() {
+    await j('POST', '/api/creators', JSON.stringify({ url: document.getElementById('url').value }));
+    refresh();
+  }
+  async function del(url) { await fetch('/api/creators?url=' + encodeURIComponent(url), { method: 'DELETE' }); refresh(); }
+  async function poll() { await j('POST', '/api/poll'); setTimeout(refresh, 2000); }
+  async function saveCookies() {
+    await fetch('/api/cookies', { method: 'POST', body: document.getElementById('cookies').value });
+    alert('saved');
+  }
+  refresh();
+</script>

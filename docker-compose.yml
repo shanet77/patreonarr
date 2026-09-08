@@ -1,0 +1,15 @@
+services:
+  patreonarr-bridge:
+    build: .
+    container_name: patreonarr-bridge
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/data
+    environment:
+      - TA_HOST=http://tubearchivist:8000
+      - TA_API_TOKEN=${TA_API_TOKEN}
+      - POLL_INTERVAL_MIN=30
+    depends_on:
+      - tubearchivist
