@@ -16,7 +16,21 @@ const PORT = Number(process.env.PORT ?? 8080);
 const COOKIES = process.env.COOKIES_PATH ?? "/data/patreon-cookies.txt";
 const POLL_MIN = Number(process.env.POLL_INTERVAL_MIN ?? 30);
 
+let polling = false;
 async function poll(): Promise<void> {
+	if (polling) {
+		console.log("poll already running, skipping");
+		return;
+	}
+	polling = true;
+	try {
+		await pollInner();
+	} finally {
+		polling = false;
+	}
+}
+
+async function pollInner(): Promise<void> {
 	if (!existsSync(COOKIES)) {
 		console.log("no cookies file yet, skipping poll");
 		return;
@@ -31,15 +45,16 @@ async function poll(): Promise<void> {
 		}
 		for (const post of posts) {
 			if (isSeen(post.id)) continue;
-			const ids = await extractYoutubeIds(post.url, COOKIES);
-			recordSeen(post.id, post.title, ids);
+			recordSeen(post.id, "", []);
+			const { ids, title } = await extractYoutubeIds(post.url, COOKIES);
+			recordSeen(post.id, title || post.title, ids);
 			if (!ids.length) {
 				console.log(`no youtube embeds in ${post.url}`);
 				continue;
 			}
 			try {
 				await pushToTA(ids);
-				console.log(`pushed ${ids.length} video(s) from "${post.title}"`);
+				console.log(`pushed ${ids.length} video(s) from "${title || post.title}"`);
 			} catch (err) {
 				console.log(`TA push failed: ${(err as Error).message}`);
 			}

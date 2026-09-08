@@ -47,7 +47,22 @@ export async function listPosts(campaignUrl: string, cookies: string): Promise<P
   return parsePostList(stdout);
 }
 
-export async function extractYoutubeIds(postUrl: string, cookies: string): Promise<string[]> {
+export interface PostDetail {
+  ids: string[];
+  title: string;
+}
+
+export function parsePostDetail(text: string): PostDetail {
+  let title = "";
+  try {
+    title = (JSON.parse(text) as { title?: string }).title ?? "";
+  } catch {
+    title = "";
+  }
+  return { ids: parseYoutubeIds(text), title };
+}
+
+export async function extractYoutubeIds(postUrl: string, cookies: string): Promise<PostDetail> {
   let stdout: string;
   try {
     ({ stdout } = await exec(
@@ -56,7 +71,7 @@ export async function extractYoutubeIds(postUrl: string, cookies: string): Promi
       { maxBuffer: 64 * 1024 * 1024 },
     ));
   } catch {
-    return [];
+    return { ids: [], title: "" };
   }
-  return parseYoutubeIds(stdout);
+  return parsePostDetail(stdout);
 }

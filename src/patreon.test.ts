@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parsePostList, parseYoutubeIds } from "./patreon.js";
+import { parsePostList, parsePostDetail, parseYoutubeIds } from "./patreon.js";
 
 test("parsePostList skips blank and broken lines", () => {
   const stdout = [
@@ -29,4 +29,16 @@ test("parseYoutubeIds matches all embed styles, dedupes, ignores junk", () => {
 
 test("parseYoutubeIds returns empty when nothing matches", () => {
   assert.deepEqual(parseYoutubeIds("no videos here"), []);
+});
+
+test("parsePostDetail pulls title and ids from -J dump", () => {
+  const dump = JSON.stringify({
+    title: "Cool Post",
+    description: "watch https://youtu.be/9bZkp7q19f0 today",
+  });
+  assert.deepEqual(parsePostDetail(dump), { ids: ["9bZkp7q19f0"], title: "Cool Post" });
+  assert.deepEqual(parsePostDetail("not json https://youtu.be/9bZkp7q19f0"), {
+    ids: ["9bZkp7q19f0"],
+    title: "",
+  });
 });

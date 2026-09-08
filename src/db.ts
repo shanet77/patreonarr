@@ -46,7 +46,7 @@ export function isSeen(post_id: string): boolean {
 
 export function recordSeen(post_id: string, title: string, yt_ids: string[]): void {
 	db.prepare(
-		"INSERT OR IGNORE INTO seen(post_id, title, yt_ids, created_at) VALUES (?, ?, ?, ?)",
+		"INSERT INTO seen(post_id, title, yt_ids, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(post_id) DO UPDATE SET title=excluded.title, yt_ids=excluded.yt_ids",
 	).run(post_id, title, JSON.stringify(yt_ids), Math.floor(Date.now() / 1000));
 }
 

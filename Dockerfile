@@ -1,13 +1,19 @@
+FROM node:24-slim AS build
+WORKDIR /app
+COPY package.json package-lock.json tsconfig.json ./
+RUN npm ci
+COPY src/ ./src/
+RUN npx tsc && cp src/public.html dist/public.html
+
 FROM node:24-slim
 WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates python3 \
   && rm -rf /var/lib/apt/lists/* \
   && curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
   && chmod +x /usr/local/bin/yt-dlp
-COPY package.json tsconfig.json ./
-RUN npm ci --omit=dev 2>/dev/null || npm install --omit=dev
-COPY src/ ./src/
-RUN npx tsc && cp src/public.html dist/public.html
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+COPY --from=build /app/dist/ ./dist/
 VOLUME /data
 EXPOSE 8080
 ENV DB_PATH=/data/bridge.db COOKIES_PATH=/data/patreon-cookies.txt

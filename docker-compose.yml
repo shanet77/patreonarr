@@ -11,5 +11,12 @@ services:
       - TA_HOST=http://tubearchivist:8000
       - TA_API_TOKEN=${TA_API_TOKEN}
       - POLL_INTERVAL_MIN=30
-    depends_on:
-      - tubearchivist
+    networks:
+      - ta
+
+# joins TA's default network so http://tubearchivist:8000 resolves.
+# confirm the name with: docker network ls | grep tubearchivist
+networks:
+  ta:
+    name: tubearchivist_default
+    external: true
