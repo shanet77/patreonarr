@@ -9,7 +9,7 @@ import {
 	touchChecked,
 	getSeen,
 } from "./db.js";
-import { listPosts, extractYoutubeIds } from "./patreon.js";
+import { listPosts, extractYoutubeIds, sanitizeCookies, cleanCookieFile } from "./patreon.js";
 import { pushToTA } from "./ta.js";
 
 const PORT = Number(process.env.PORT ?? 8080);
@@ -35,6 +35,7 @@ async function pollInner(): Promise<void> {
 		console.log("no cookies file yet, skipping poll");
 		return;
 	}
+	cleanCookieFile(COOKIES);
 	for (const creator of listCreators()) {
 		let posts;
 		try {
@@ -99,7 +100,8 @@ const routes: Record<string, Handler> = {
 		json(res, 202, { ok: true });
 	},
 	"POST /api/cookies": async (req, res) => {
-		writeFileSync(COOKIES, await readBody(req), { mode: 0o600 });
+		const raw = (await readBody(req)).toString();
+		writeFileSync(COOKIES, sanitizeCookies(raw.endsWith("\n") ? raw : raw + "\n"), { mode: 0o600 });
 		json(res, 200, { ok: true });
 	},
 	"GET /": (_req, res) => {
