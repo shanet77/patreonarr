@@ -1,8 +1,4 @@
-export interface TAConfig {
-	host: string;
-	token: string;
-	autostart: boolean;
-}
+import type { TAConfig } from "./config.js";
 
 export type TAFetch = (
 	input: string | URL | Request,
@@ -13,20 +9,9 @@ export interface TAPusher {
 	push(ids: string[]): Promise<void>;
 }
 
-export function resolveTAConfig(env: NodeJS.ProcessEnv = process.env): TAConfig {
-	return {
-		host: (env.TA_HOST ?? "").replace(/\/+$/, ""),
-		token: env.TA_API_TOKEN ?? "",
-		autostart: (env.TA_AUTOSTART ?? "false").toLowerCase() === "true",
-	};
-}
-
-export function isTAConfigured(config: TAConfig): boolean {
-	return Boolean(config.host && config.token);
-}
-
+/** Push adapter: config and fetch are injected; no env reads, no globals. */
 export function createTAPusher(config: TAConfig, fetchFn: TAFetch = globalThis.fetch): TAPusher {
-	const host = config.host.replace(/\/+$/, "");
+	const host = config.host;
 	if (!host || !config.token) {
 		return { push: async () => {} };
 	}
@@ -45,11 +30,4 @@ export function createTAPusher(config: TAConfig, fetchFn: TAFetch = globalThis.f
 			if (!res.ok) throw new Error(`TA push failed: ${res.status} ${await res.text()}`);
 		},
 	};
-}
-
-export function createTAPusherFromEnv(
-	env: NodeJS.ProcessEnv = process.env,
-	fetchFn: TAFetch = globalThis.fetch,
-): TAPusher {
-	return createTAPusher(resolveTAConfig(env), fetchFn);
 }

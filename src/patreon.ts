@@ -1,5 +1,4 @@
 import { execFile } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { promisify } from "node:util";
 
 const exec = promisify(execFile);
@@ -41,25 +40,6 @@ export function parseYoutubeIds(text: string): string[] {
 	const ids = new Set<string>();
 	for (const m of text.matchAll(YT_RE)) ids.add(m[1]);
 	return [...ids];
-}
-
-export function sanitizeCookies(text: string): string {
-	return text
-		.split("\n")
-		.filter((line) => {
-			const t = line.trim();
-			if (!t || t.startsWith("#")) return true;
-			const domain = t.split("\t")[0] ?? "";
-			return domain === ".patreon.com" || domain === "www.patreon.com" || domain === "patreon.com";
-		})
-		.join("\n");
-}
-
-export function cleanCookieFile(path: string): void {
-	if (!existsSync(path)) return;
-	const raw = readFileSync(path, "utf8");
-	const clean = sanitizeCookies(raw.endsWith("\n") ? raw : raw + "\n");
-	if (clean !== raw) writeFileSync(path, clean, { mode: 0o600 });
 }
 
 export async function listPosts(

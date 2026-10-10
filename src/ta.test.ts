@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createTAPusher, resolveTAConfig, isTAConfigured } from "./ta.js";
+import { createTAPusher } from "./ta.js";
+import { loadConfig, isTAConfigured } from "./config.js";
 
 test("unconfigured pusher never fetches and resolves", async () => {
   const pusher = createTAPusher({ host: "", token: "", autostart: false }, async () => {
@@ -10,11 +11,11 @@ test("unconfigured pusher never fetches and resolves", async () => {
   assert.equal(isTAConfigured({ host: "", token: "", autostart: false }), false);
 });
 
-test("posts ids to TA download endpoint with trimmed host", async () => {
+test("posts ids to TA download endpoint using configured host", async () => {
   let url = "";
   let init: RequestInit = {};
   const pusher = createTAPusher(
-    { host: "https://ta.example///", token: "tok", autostart: true },
+    { host: "https://ta.example", token: "tok", autostart: true },
     async (input, options) => {
       url = String(input);
       init = options ?? {};
@@ -29,22 +30,24 @@ test("posts ids to TA download endpoint with trimmed host", async () => {
   assert.equal((init.headers as Record<string, string>).Authorization, "Token tok");
 });
 
-test("autostart defaults to false and only true opts in", async () => {
-  assert.equal(resolveTAConfig({}).autostart, false);
-  assert.equal(resolveTAConfig({ TA_AUTOSTART: "true" }).autostart, true);
-  assert.equal(resolveTAConfig({ TA_AUTOSTART: "false" }).autostart, false);
-  assert.equal(resolveTAConfig({}).host, "");
-  assert.equal(resolveTAConfig({ TA_HOST: "https://ta.example///" }).host, "https://ta.example");
+test("TA settings validated once in loadConfig: trim, default, opt-in autostart", () => {
+  assert.equal(loadConfig({}).ta.autostart, false);
+  assert.equal(loadConfig({ TA_AUTOSTART: "true" }).ta.autostart, true);
+  assert.equal(loadConfig({ TA_AUTOSTART: "false" }).ta.autostart, false);
+  assert.equal(loadConfig({}).ta.host, "");
+  assert.equal(loadConfig({ TA_HOST: "https://ta.example///" }).ta.host, "https://ta.example");
 
   let url = "";
-  const pusher = createTAPusher(resolveTAConfig({ TA_HOST: "https://ta.example", TA_API_TOKEN: "tok" }), async (
-    input,
-  ) => {
-    url = String(input);
-    return new Response("ok", { status: 200 });
+  const pusher = createTAPusher(
+    loadConfig({ TA_HOST: "https://ta.example", TA_API_TOKEN: "tok" }).ta,
+    async (input) => {
+      url = String(input);
+      return new Response("ok", { status: 200 });
+    },
+  );
+  return pusher.push(["dQw4w9WgXcQ"]).then(() => {
+    assert.equal(url, "https://ta.example/api/download/?autostart=false");
   });
-  await pusher.push(["dQw4w9WgXcQ"]);
-  assert.equal(url, "https://ta.example/api/download/?autostart=false");
 });
 
 test("throws on TA error response", async () => {

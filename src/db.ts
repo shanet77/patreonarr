@@ -39,14 +39,10 @@ export interface StoreOptions {
 
 const defaultNow = () => Math.floor(Date.now() / 1000);
 
-function resolvePath(explicit?: string): string {
-	return explicit ?? process.env.DB_PATH ?? "/data/bridge.db";
-}
-
-/** Open the SQLite-backed Store explicitly. No import-time side effects. */
-export function openStore(path?: string, opts: StoreOptions = {}): Store {
+/** Open the SQLite-backed Store explicitly. Path comes from Config, not env. */
+export function openStore(path: string, opts: StoreOptions = {}): Store {
 	const now = opts.now ?? defaultNow;
-	const db = new DatabaseSync(resolvePath(path));
+	const db = new DatabaseSync(path);
 
 	db.exec(`
 CREATE TABLE IF NOT EXISTS creators(url TEXT PRIMARY KEY, last_check INTEGER);

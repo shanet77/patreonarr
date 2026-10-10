@@ -1,18 +1,17 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { openStore } from "./db.js";
-import { listPosts, extractYoutubeIds, sanitizeCookies, cleanCookieFile } from "./patreon.js";
-import { createTAPusher, isTAConfigured, resolveTAConfig } from "./ta.js";
+import { listPosts, extractYoutubeIds } from "./patreon.js";
+import { createTAPusher } from "./ta.js";
 import { pollOnce } from "./poll.js";
+import { loadConfig, isTAConfigured, cleanCookieFile, writeCookiesFile } from "./config.js";
 
-const PORT = Number(process.env.PORT ?? 8080);
-const COOKIES = process.env.COOKIES_PATH ?? "/data/patreon-cookies.txt";
-const POLL_MIN = Number(process.env.POLL_INTERVAL_MIN ?? 30);
+const config = loadConfig();
+const { port: PORT, pollMin: POLL_MIN, cookiesPath: COOKIES } = config;
 
-const store = openStore();
-const taConfig = resolveTAConfig(process.env);
-const pusher = createTAPusher(taConfig);
-if (!isTAConfigured(taConfig)) {
+const store = openStore(config.dbPath);
+const pusher = createTAPusher(config.ta);
+if (!isTAConfigured(config.ta)) {
 	console.log("TA not configured, pushes will be skipped until TA_HOST and TA_API_TOKEN are set");
 }
 
@@ -76,7 +75,7 @@ const routes: Record<string, Handler> = {
 	},
 	"POST /api/cookies": async (req, res) => {
 		const raw = (await readBody(req)).toString();
-		writeFileSync(COOKIES, sanitizeCookies(raw.endsWith("\n") ? raw : raw + "\n"), { mode: 0o600 });
+		writeCookiesFile(COOKIES, raw);
 		json(res, 200, { ok: true });
 	},
 	"GET /": (_req, res) => {
