@@ -11,6 +11,7 @@ import {
 } from "./db.js";
 import { listPosts, extractYoutubeIds, sanitizeCookies, cleanCookieFile } from "./patreon.js";
 import { pushToTA } from "./ta.js";
+import { pollOnce } from "./poll.js";
 
 const PORT = Number(process.env.PORT ?? 8080);
 const COOKIES = process.env.COOKIES_PATH ?? "/data/patreon-cookies.txt";
@@ -24,43 +25,18 @@ async function poll(): Promise<void> {
 	}
 	polling = true;
 	try {
-		await pollInner();
+		await pollOnce({
+			store: { listCreators, isSeen, recordSeen, touchChecked },
+			feed: {
+				listPosts: (url) => listPosts(url, COOKIES),
+				extractIds: (url) => extractYoutubeIds(url, COOKIES),
+			},
+			pusher: { push: (ids) => pushToTA(ids) },
+			cookiesReady: () => existsSync(COOKIES),
+			prepareCookies: () => cleanCookieFile(COOKIES),
+		});
 	} finally {
 		polling = false;
-	}
-}
-
-async function pollInner(): Promise<void> {
-	if (!existsSync(COOKIES)) {
-		console.log("no cookies file yet, skipping poll");
-		return;
-	}
-	cleanCookieFile(COOKIES);
-	for (const creator of listCreators()) {
-		let posts;
-		try {
-			posts = await listPosts(creator.url, COOKIES);
-		} catch (err) {
-			console.log(`poll failed for ${creator.url}: ${(err as Error).message}`);
-			continue;
-		}
-		for (const post of posts) {
-			if (isSeen(post.id)) continue;
-			recordSeen(post.id, "", []);
-			const { ids, title } = await extractYoutubeIds(post.url, COOKIES);
-			recordSeen(post.id, title || post.title, ids);
-			if (!ids.length) {
-				console.log(`no youtube embeds in ${post.url}`);
-				continue;
-			}
-			try {
-				await pushToTA(ids);
-				console.log(`pushed ${ids.length} video(s) from "${title || post.title}"`);
-			} catch (err) {
-				console.log(`TA push failed: ${(err as Error).message}`);
-			}
-		}
-		touchChecked(creator.url);
 	}
 }
 
