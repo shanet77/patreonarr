@@ -4,6 +4,18 @@ import { promisify } from "node:util";
 
 const exec = promisify(execFile);
 
+/** Seam for tests: takes full yt-dlp argv, resolves with stdout. */
+export type YtdlpRunner = (args: string[]) => Promise<string>;
+
+const DEFAULT_MAX_BUFFER = 64 * 1024 * 1024;
+
+function createDefaultRunner(): YtdlpRunner {
+	return async (args) => {
+		const { stdout } = await exec("yt-dlp", args, { maxBuffer: DEFAULT_MAX_BUFFER });
+		return stdout;
+	};
+}
+
 export interface Post {
 	id: string;
 	title: string;
@@ -50,20 +62,20 @@ export function cleanCookieFile(path: string): void {
 	if (clean !== raw) writeFileSync(path, clean, { mode: 0o600 });
 }
 
-export async function listPosts(campaignUrl: string, cookies: string): Promise<Post[]> {
-	const { stdout } = await exec(
-		"yt-dlp",
-		[
-			"--cookies",
-			cookies,
-			"--flat-playlist",
-			"--no-warnings",
-			"--print",
-			"%(id)s\t%(title)s\t%(webpage_url)s",
-			campaignUrl,
-		],
-		{ maxBuffer: 32 * 1024 * 1024 },
-	);
+export async function listPosts(
+	campaignUrl: string,
+	cookies: string,
+	runner: YtdlpRunner = createDefaultRunner(),
+): Promise<Post[]> {
+	const stdout = await runner([
+		"--cookies",
+		cookies,
+		"--flat-playlist",
+		"--no-warnings",
+		"--print",
+		"%(id)s\t%(title)s\t%(webpage_url)s",
+		campaignUrl,
+	]);
 	return parsePostList(stdout);
 }
 
@@ -82,16 +94,18 @@ export function parsePostDetail(text: string): PostDetail {
 	return { ids: parseYoutubeIds(text), title };
 }
 
-export async function extractYoutubeIds(postUrl: string, cookies: string): Promise<PostDetail> {
-	let stdout: string;
-	try {
-		({ stdout } = await exec(
-			"yt-dlp",
-			["--cookies", cookies, "--skip-download", "--no-warnings", "-J", postUrl],
-			{ maxBuffer: 64 * 1024 * 1024 },
-		));
-	} catch {
-		return { ids: [], title: "" };
-	}
+export async function extractYoutubeIds(
+	postUrl: string,
+	cookies: string,
+	runner: YtdlpRunner = createDefaultRunner(),
+): Promise<PostDetail> {
+	const stdout = await runner([
+		"--cookies",
+		cookies,
+		"--skip-download",
+		"--no-warnings",
+		"-J",
+		postUrl,
+	]);
 	return parsePostDetail(stdout);
 }
