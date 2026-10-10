@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { openStore } from "./db.js";
 import { listPosts, extractYoutubeIds, sanitizeCookies, cleanCookieFile } from "./patreon.js";
-import { pushToTA } from "./ta.js";
+import { createTAPusher, isTAConfigured, resolveTAConfig } from "./ta.js";
 import { pollOnce } from "./poll.js";
 
 const PORT = Number(process.env.PORT ?? 8080);
@@ -10,6 +10,11 @@ const COOKIES = process.env.COOKIES_PATH ?? "/data/patreon-cookies.txt";
 const POLL_MIN = Number(process.env.POLL_INTERVAL_MIN ?? 30);
 
 const store = openStore();
+const taConfig = resolveTAConfig(process.env);
+const pusher = createTAPusher(taConfig);
+if (!isTAConfigured(taConfig)) {
+	console.log("TA not configured, pushes will be skipped until TA_HOST and TA_API_TOKEN are set");
+}
 
 let polling = false;
 async function poll(): Promise<void> {
@@ -25,7 +30,7 @@ async function poll(): Promise<void> {
 				listPosts: (url) => listPosts(url, COOKIES),
 				extractIds: (url) => extractYoutubeIds(url, COOKIES),
 			},
-			pusher: { push: (ids) => pushToTA(ids) },
+			pusher,
 			cookiesReady: () => existsSync(COOKIES),
 			prepareCookies: () => cleanCookieFile(COOKIES),
 		});
