@@ -12,8 +12,8 @@ export interface PushAdapter {
 
 export interface SeenStore {
 	listCreators(): Creator[] | Promise<Creator[]>;
-	isSeen(postId: string): boolean;
-	recordSeen(postId: string, title: string, ytIds: string[]): void;
+	claim(postId: string): boolean;
+	commit(postId: string, title: string, ytIds: string[]): void;
 	touchChecked(creatorUrl: string): void;
 }
 
@@ -73,7 +73,7 @@ export async function pollOnce(deps: PollDeps): Promise<PollSummary> {
 		let creatorFailed = false;
 		for (const post of posts) {
 			summary.postsScanned += 1;
-			if (deps.store.isSeen(post.id)) {
+			if (!deps.store.claim(post.id)) {
 				summary.skippedSeen += 1;
 				continue;
 			}
@@ -88,7 +88,7 @@ export async function pollOnce(deps: PollDeps): Promise<PollSummary> {
 			const { ids, title } = detail;
 			const resolvedTitle = title || post.title;
 			if (!ids.length) {
-				deps.store.recordSeen(post.id, resolvedTitle, ids);
+				deps.store.commit(post.id, resolvedTitle, ids);
 				summary.noEmbedPosts += 1;
 				log(`no youtube embeds in ${post.url}`);
 				continue;
@@ -101,7 +101,7 @@ export async function pollOnce(deps: PollDeps): Promise<PollSummary> {
 				creatorFailed = true;
 				continue;
 			}
-			deps.store.recordSeen(post.id, resolvedTitle, ids);
+			deps.store.commit(post.id, resolvedTitle, ids);
 			summary.pushedPosts += 1;
 			summary.pushedVideos += ids.length;
 			log(`pushed ${ids.length} video(s) from "${resolvedTitle}"`);

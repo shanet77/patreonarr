@@ -1,32 +1,23 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { pollOnce, type PollDeps } from "./poll.js";
+import { createMemoryStore, type Store } from "./db.js";
 
-function makeDeps(overrides: Partial<PollDeps> = {}): PollDeps & {
-	seen: Map<string, { title: string; ids: string[] }>;
-	touched: string[];
+const CREATOR = "https://www.patreon.com/c/x/posts";
+
+function makeDeps(overrides: Omit<Partial<PollDeps>, "store"> = {}): Omit<PollDeps, "store"> & {
+	store: Store;
 	pushed: string[][];
 	logs: string[];
 } {
-	const seen = new Map<string, { title: string; ids: string[] }>();
-	const touched: string[] = [];
+	const store = createMemoryStore();
+	store.addCreator(CREATOR);
 	const pushed: string[][] = [];
 	const logs: string[] = [];
 	return {
-		seen,
-		touched,
+		store,
 		pushed,
 		logs,
-		store: {
-			listCreators: () => [{ url: "https://www.patreon.com/c/x/posts", last_check: null }],
-			isSeen: (id) => seen.has(id),
-			recordSeen: (id, title, ids) => {
-				seen.set(id, { title, ids });
-			},
-			touchChecked: (url) => {
-				touched.push(url);
-			},
-		},
 		feed: {
 			listPosts: async () => [{ id: "p1", title: "Post 1", url: "https://www.patreon.com/posts/p1" }],
 			extractIds: async () => ({ ids: ["dQw4w9WgXcQ"], title: "Vid" }),
@@ -48,8 +39,8 @@ test("push success commits seen and touches creator", async () => {
 	const summary = await pollOnce(d);
 	assert.equal(summary.pushedPosts, 1);
 	assert.equal(summary.pushedVideos, 1);
-	assert.deepEqual(d.seen.get("p1"), { title: "Vid", ids: ["dQw4w9WgXcQ"] });
-	assert.deepEqual(d.touched, ["https://www.patreon.com/c/x/posts"]);
+	assert.deepEqual(d.store.getSeen(), [{ post_id: "p1", title: "Vid", yt_ids: ["dQw4w9WgXcQ"] }]);
+	assert.ok((d.store.listCreators()[0].last_check ?? 0) > 0);
 	assert.equal(d.pushed.length, 1);
 });
 
@@ -64,12 +55,12 @@ test("no push → no commit, touchChecked skipped, retry succeeds", async () => 
 	const first = await pollOnce(d);
 	assert.equal(first.pushedPosts, 0);
 	assert.equal(first.failedPushes, 1);
-	assert.equal(d.seen.has("p1"), false);
-	assert.deepEqual(d.touched, []);
+	assert.equal(d.store.claim("p1"), true);
+	assert.equal(d.store.listCreators()[0].last_check, null);
 	const second = await pollOnce(d);
 	assert.equal(second.pushedPosts, 1);
-	assert.deepEqual(d.seen.get("p1"), { title: "Vid", ids: ["dQw4w9WgXcQ"] });
-	assert.deepEqual(d.touched, ["https://www.patreon.com/c/x/posts"]);
+	assert.deepEqual(d.store.getSeen(), [{ post_id: "p1", title: "Vid", yt_ids: ["dQw4w9WgXcQ"] }]);
+	assert.ok((d.store.listCreators()[0].last_check ?? 0) > 0);
 });
 
 test("no embeds commit without push but still touch", async () => {
@@ -82,13 +73,13 @@ test("no embeds commit without push but still touch", async () => {
 	const summary = await pollOnce(d);
 	assert.equal(summary.noEmbedPosts, 1);
 	assert.equal(d.pushed.length, 0);
-	assert.deepEqual(d.seen.get("p1"), { title: "Post 1", ids: [] });
-	assert.deepEqual(d.touched, ["https://www.patreon.com/c/x/posts"]);
+	assert.deepEqual(d.store.getSeen(), [{ post_id: "p1", title: "Post 1", yt_ids: [] }]);
+	assert.ok((d.store.listCreators()[0].last_check ?? 0) > 0);
 });
 
 test("already-seen posts never hit extract or push", async () => {
 	const d = makeDeps();
-	d.store.isSeen = () => true;
+	d.store.commit("p1", "Vid", ["dQw4w9WgXcQ"]);
 	let extracted = 0;
 	d.feed.extractIds = async () => {
 		extracted += 1;
@@ -98,7 +89,7 @@ test("already-seen posts never hit extract or push", async () => {
 	assert.equal(summary.skippedSeen, 1);
 	assert.equal(extracted, 0);
 	assert.equal(d.pushed.length, 0);
-	assert.equal(d.seen.size, 0);
+	assert.equal(d.store.getSeen().length, 1);
 });
 
 test("listPosts failure skips creator without touchChecked", async () => {
@@ -111,16 +102,17 @@ test("listPosts failure skips creator without touchChecked", async () => {
 		},
 	});
 	const summary = await pollOnce(d);
-	assert.deepEqual(summary.failedCreators, ["https://www.patreon.com/c/x/posts"]);
-	assert.deepEqual(d.touched, []);
+	assert.deepEqual(summary.failedCreators, [CREATOR]);
+	assert.equal(d.store.listCreators()[0].last_check, null);
 });
 
 test("cookies missing skips whole poll", async () => {
 	const d = makeDeps({ cookiesReady: () => false });
 	let listed = false;
+	const origList = d.store.listCreators;
 	d.store.listCreators = () => {
 		listed = true;
-		return [];
+		return origList();
 	};
 	const summary = await pollOnce(d);
 	assert.equal(listed, false);

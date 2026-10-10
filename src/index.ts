@@ -1,14 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import {
-	addCreator,
-	listCreators,
-	isSeen,
-	recordSeen,
-	removeCreator,
-	touchChecked,
-	getSeen,
-} from "./db.js";
+import { openStore } from "./db.js";
 import { listPosts, extractYoutubeIds, sanitizeCookies, cleanCookieFile } from "./patreon.js";
 import { pushToTA } from "./ta.js";
 import { pollOnce } from "./poll.js";
@@ -16,6 +8,8 @@ import { pollOnce } from "./poll.js";
 const PORT = Number(process.env.PORT ?? 8080);
 const COOKIES = process.env.COOKIES_PATH ?? "/data/patreon-cookies.txt";
 const POLL_MIN = Number(process.env.POLL_INTERVAL_MIN ?? 30);
+
+const store = openStore();
 
 let polling = false;
 async function poll(): Promise<void> {
@@ -26,7 +20,7 @@ async function poll(): Promise<void> {
 	polling = true;
 	try {
 		await pollOnce({
-			store: { listCreators, isSeen, recordSeen, touchChecked },
+			store,
 			feed: {
 				listPosts: (url) => listPosts(url, COOKIES),
 				extractIds: (url) => extractYoutubeIds(url, COOKIES),
@@ -56,21 +50,21 @@ async function readBody(req: IncomingMessage): Promise<Buffer> {
 
 const routes: Record<string, Handler> = {
 	"GET /api/health": (_req, res) => json(res, 200, { ok: true }),
-	"GET /api/creators": (_req, res) => json(res, 200, listCreators()),
+	"GET /api/creators": (_req, res) => json(res, 200, store.listCreators()),
 	"POST /api/creators": async (req, res) => {
 		const { url: creatorUrl } = JSON.parse((await readBody(req)).toString() || "{}") as { url?: string };
 		if (!creatorUrl || !creatorUrl.startsWith("http")) {
 			json(res, 400, { error: "url required, e.g. https://www.patreon.com/c/<vanity>/posts" });
 			return;
 		}
-		addCreator(creatorUrl);
+		store.addCreator(creatorUrl);
 		json(res, 201, { ok: true });
 	},
 	"DELETE /api/creators": (req, res, url) => {
-		removeCreator(url.searchParams.get("url") ?? "");
+		store.removeCreator(url.searchParams.get("url") ?? "");
 		json(res, 200, { ok: true });
 	},
-	"GET /api/seen": (_req, res) => json(res, 200, getSeen()),
+	"GET /api/seen": (_req, res) => json(res, 200, store.getSeen()),
 	"POST /api/poll": (_req, res) => {
 		poll().catch((err: Error) => console.log(`manual poll failed: ${err.message}`));
 		json(res, 202, { ok: true });
