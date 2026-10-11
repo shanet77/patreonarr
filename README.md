@@ -7,7 +7,8 @@ TubeArchivist downloads from YouTube (based on yt-dlp). Many Patreon creators em
 unlisted) YouTube videos in their posts, so this bridge polls your Patreon
 feed, pulls out the embedded YouTube IDs, and pushes them to TubeArchivist's
 download queue via its API. TubeArchivist then handles downloading, indexing,
-and playback like any other video. Leaves TubeArchivist unmodified. Potentially in the future will propose this as a feature directly within TubeArchivist or spin an entirely standalone application.
+and playback like any other video.
+Potentially in the future will propose this as a feature directly within TubeArchivist or spin an entirely standalone application.
 ```
 patreon (cookies) → bridge → YouTube IDs → TubeArchivist /api/download/
 ```
@@ -142,7 +143,3 @@ npm install
 npm test    # tsc + node --test, pure parsers in *.test.ts
 npm run dev # watch mode (needs yt-dlp on PATH for real polls)
 ```
-
-TypeScript on Node 24, `node:http`, `node:sqlite`. The image is
-`node:24-slim` plus the `yt-dlp` binary and `python3` (yt-dlp is a Python
-zipapp and won't start without it).
