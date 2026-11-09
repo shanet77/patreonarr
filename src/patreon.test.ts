@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parsePostList, parsePostDetail, parseYoutubeIds, inspectPost } from "./patreon.js";
+import { parsePostList, parsePostDetail, parseYoutubeIds, inspectPost, listPosts } from "./patreon.js";
 
 test("parsePostList skips blank and broken lines", () => {
   const stdout = [
@@ -81,4 +81,29 @@ test("inspectPost passes cookies and post url to the runner", async () => {
   assert.deepEqual(detail, { ids: [], title: "T", direct: true });
   assert.deepEqual(seen.slice(0, 2), ["--cookies", "/c.txt"]);
   assert.equal(seen.at(-1), "https://www.patreon.com/posts/1");
+});
+
+test("inspectPost treats text/image-only posts as having no video", async () => {
+  const detail = await inspectPost("https://www.patreon.com/posts/1", "/c.txt", async () => {
+    throw new Error("Command failed: yt-dlp\nERROR: [patreon] 1: No supported media found in this post\n");
+  });
+  assert.deepEqual(detail, { ids: [], title: "", direct: false });
+});
+
+test("inspectPost still fails on locked posts and other errors", async () => {
+  await assert.rejects(
+    inspectPost("https://www.patreon.com/posts/1", "/c.txt", async () => {
+      throw new Error("ERROR: [patreon] 1: You do not have access to this post");
+    }),
+    /do not have access/,
+  );
+});
+
+test("listPosts asks yt-dlp for an empty title instead of NA", async () => {
+  let seen: string[] = [];
+  await listPosts("https://www.patreon.com/c/x/posts", "/c.txt", async (args) => {
+    seen = args;
+    return "";
+  });
+  assert.equal(seen[seen.indexOf("--print") + 1], "%(id)s\t%(title|)s\t%(webpage_url)s");
 });

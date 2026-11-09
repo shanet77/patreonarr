@@ -131,8 +131,9 @@ Adding a creator queues their whole back catalog of Patreon-hosted video, so
 size `DOWNLOAD_DIR` accordingly before hitting **Download all**, or remove
 entries you don't want. Failed downloads keep yt-dlp's error and can be
 retried; a download cut off by a restart is requeued on startup. A failed TA
-push leaves the post unseen so the next poll retries it. Posts with no video
-are logged and skipped; already-seen posts are never re-processed.
+push leaves the post unseen so the next poll retries it. Text and image-only
+posts are marked seen without a push or download; posts above your tier stay
+unseen and are retried each poll. Already-seen posts are never re-processed.
 
 ## Configuration
 

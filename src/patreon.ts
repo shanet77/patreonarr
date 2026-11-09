@@ -38,7 +38,7 @@ export async function listPosts(
 		"--flat-playlist",
 		"--no-warnings",
 		"--print",
-		"%(id)s\t%(title)s\t%(webpage_url)s",
+		"%(id)s\t%(title|)s\t%(webpage_url)s",
 		campaignUrl,
 	]);
 	return parsePostList(stdout);
@@ -73,18 +73,23 @@ export function parsePostDetail(text: string): PostDetail {
 	return { ids: parseYoutubeIds(text), title: info.title ?? "", direct: hasDirectMedia(info) };
 }
 
+const NO_MEDIA_RE = /No supported media found in this post/;
+
+export function isNoMediaError(err: unknown): boolean {
+	return NO_MEDIA_RE.test(err instanceof Error ? err.message : String(err));
+}
+
 export async function inspectPost(
 	postUrl: string,
 	cookies: string,
 	runner: YtdlpRunner = createDefaultRunner(),
 ): Promise<PostDetail> {
-	const stdout = await runner([
-		"--cookies",
-		cookies,
-		"--skip-download",
-		"--no-warnings",
-		"-J",
-		postUrl,
-	]);
+	let stdout: string;
+	try {
+		stdout = await runner(["--cookies", cookies, "--skip-download", "--no-warnings", "-J", postUrl]);
+	} catch (err) {
+		if (isNoMediaError(err)) return { ids: [], title: "", direct: false };
+		throw err;
+	}
 	return parsePostDetail(stdout);
 }
