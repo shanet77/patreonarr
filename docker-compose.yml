@@ -7,10 +7,12 @@ services:
       - "8080:8080"
     volumes:
       - ./data:/data
+      - ./downloads:/downloads
     environment:
       - TA_HOST=http://tubearchivist:8000
       - TA_API_TOKEN=${TA_API_TOKEN}
       - TA_AUTOSTART=${TA_AUTOSTART:-false}
+      - DOWNLOAD_AUTOSTART=${DOWNLOAD_AUTOSTART:-false}
       - POLL_INTERVAL_MIN=30
     networks:
       - ta

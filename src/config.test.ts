@@ -16,6 +16,11 @@ test("loadConfig applies documented defaults", () => {
       dbPath: "/data/bridge.db",
       cookiesPath: "/data/patreon-cookies.txt",
       ta: { host: "", token: "", autostart: false },
+      download: {
+        dir: "/downloads",
+        template: "%(uploader)s/%(upload_date)s %(title)s [%(id)s].%(ext)s",
+        autostart: false,
+      },
     },
   );
 });
@@ -29,12 +34,16 @@ test("loadConfig honors explicit values", () => {
     TA_HOST: "http://ta:8000/",
     TA_API_TOKEN: "tok",
     TA_AUTOSTART: "TRUE",
+    DOWNLOAD_DIR: "/media/patreon",
+    DOWNLOAD_TEMPLATE: "%(id)s.%(ext)s",
+    DOWNLOAD_AUTOSTART: "true",
   });
   assert.equal(c.port, 9000);
   assert.equal(c.pollMin, 5);
   assert.equal(c.dbPath, "/tmp/x.db");
   assert.equal(c.cookiesPath, "/tmp/c.txt");
   assert.deepEqual(c.ta, { host: "http://ta:8000", token: "tok", autostart: true });
+  assert.deepEqual(c.download, { dir: "/media/patreon", template: "%(id)s.%(ext)s", autostart: true });
 });
 
 test("loadConfig falls back on garbage numbers instead of producing NaN", () => {

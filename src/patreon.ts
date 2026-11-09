@@ -1,19 +1,4 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-
-const exec = promisify(execFile);
-
-/** Seam for tests: takes full yt-dlp argv, resolves with stdout. */
-export type YtdlpRunner = (args: string[]) => Promise<string>;
-
-const DEFAULT_MAX_BUFFER = 64 * 1024 * 1024;
-
-function createDefaultRunner(): YtdlpRunner {
-	return async (args) => {
-		const { stdout } = await exec("yt-dlp", args, { maxBuffer: DEFAULT_MAX_BUFFER });
-		return stdout;
-	};
-}
+import { createDefaultRunner, type YtdlpRunner } from "./ytdlp.js";
 
 export interface Post {
 	id: string;
@@ -62,19 +47,33 @@ export async function listPosts(
 export interface PostDetail {
 	ids: string[];
 	title: string;
+	direct: boolean;
+}
+
+interface InfoDict {
+	title?: string;
+	extractor_key?: string;
+	entries?: (InfoDict | null)[];
+}
+
+export const YOUTUBE_EXTRACTOR = "Youtube";
+
+function hasDirectMedia(info: InfoDict): boolean {
+	const entries = info.entries ?? [info];
+	return entries.some((e) => Boolean(e?.extractor_key) && e?.extractor_key !== YOUTUBE_EXTRACTOR);
 }
 
 export function parsePostDetail(text: string): PostDetail {
-	let title = "";
+	let info: InfoDict = {};
 	try {
-		title = (JSON.parse(text) as { title?: string }).title ?? "";
+		info = (JSON.parse(text) as InfoDict | null) ?? {};
 	} catch {
-		title = "";
+		info = {};
 	}
-	return { ids: parseYoutubeIds(text), title };
+	return { ids: parseYoutubeIds(text), title: info.title ?? "", direct: hasDirectMedia(info) };
 }
 
-export async function extractYoutubeIds(
+export async function inspectPost(
 	postUrl: string,
 	cookies: string,
 	runner: YtdlpRunner = createDefaultRunner(),

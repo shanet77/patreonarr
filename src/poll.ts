@@ -3,7 +3,7 @@ import type { Post, PostDetail } from "./patreon.js";
 
 export interface FeedAdapter {
 	listPosts(creatorUrl: string): Promise<Post[]>;
-	extractIds(postUrl: string): Promise<PostDetail>;
+	inspect(postUrl: string): Promise<PostDetail>;
 }
 
 export interface PushAdapter {
@@ -14,6 +14,7 @@ export interface SeenStore {
 	listCreators(): Creator[] | Promise<Creator[]>;
 	claim(postId: string): boolean;
 	commit(postId: string, title: string, ytIds: string[]): void;
+	enqueue(postId: string, url: string, title: string): void;
 	touchChecked(creatorUrl: string): void;
 }
 
@@ -32,6 +33,7 @@ export interface PollSummary {
 	skippedSeen: number;
 	pushedPosts: number;
 	pushedVideos: number;
+	queuedDownloads: number;
 	noEmbedPosts: number;
 	failedPushes: number;
 	failedCreators: string[];
@@ -43,6 +45,7 @@ const emptySummary = (): PollSummary => ({
 	skippedSeen: 0,
 	pushedPosts: 0,
 	pushedVideos: 0,
+	queuedDownloads: 0,
 	noEmbedPosts: 0,
 	failedPushes: 0,
 	failedCreators: [],
@@ -79,32 +82,39 @@ export async function pollOnce(deps: PollDeps): Promise<PollSummary> {
 			}
 			let detail: PostDetail;
 			try {
-				detail = await deps.feed.extractIds(post.url);
+				detail = await deps.feed.inspect(post.url);
 			} catch (err) {
 				log(`extract failed for ${post.url}: ${(err as Error).message}`);
 				creatorFailed = true;
 				continue;
 			}
-			const { ids, title } = detail;
+			const { ids, title, direct } = detail;
 			const resolvedTitle = title || post.title;
-			if (!ids.length) {
+			if (!ids.length && !direct) {
 				deps.store.commit(post.id, resolvedTitle, ids);
 				summary.noEmbedPosts += 1;
-				log(`no youtube embeds in ${post.url}`);
+				log(`no video in ${post.url}`);
 				continue;
 			}
-			try {
-				await deps.pusher.push(ids);
-			} catch (err) {
-				log(`TA push failed: ${(err as Error).message}`);
-				summary.failedPushes += 1;
-				creatorFailed = true;
-				continue;
+			if (ids.length) {
+				try {
+					await deps.pusher.push(ids);
+				} catch (err) {
+					log(`TA push failed: ${(err as Error).message}`);
+					summary.failedPushes += 1;
+					creatorFailed = true;
+					continue;
+				}
+				summary.pushedPosts += 1;
+				summary.pushedVideos += ids.length;
+				log(`pushed ${ids.length} video(s) from "${resolvedTitle}"`);
+			}
+			if (direct) {
+				deps.store.enqueue(post.id, post.url, resolvedTitle);
+				summary.queuedDownloads += 1;
+				log(`queued download for "${resolvedTitle}"`);
 			}
 			deps.store.commit(post.id, resolvedTitle, ids);
-			summary.pushedPosts += 1;
-			summary.pushedVideos += ids.length;
-			log(`pushed ${ids.length} video(s) from "${resolvedTitle}"`);
 		}
 		if (!creatorFailed) {
 			deps.store.touchChecked(creator.url);

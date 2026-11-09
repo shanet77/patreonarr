@@ -11,6 +11,31 @@ export interface SeenPost {
 	yt_ids: string[];
 }
 
+export type DownloadStatus = "queued" | "downloading" | "done" | "failed";
+
+export interface DownloadItem {
+	post_id: string;
+	url: string;
+	title: string;
+	status: DownloadStatus;
+	files: string[];
+	error: string | null;
+	created_at: number;
+	updated_at: number;
+}
+
+export interface DownloadQueue {
+	enqueue(postId: string, url: string, title: string): void;
+	listDownloads(limit?: number): DownloadItem[];
+	queuedDownloads(): DownloadItem[];
+	retryDownload(postId: string): boolean;
+	markDownloading(postId: string): void;
+	markDownloaded(postId: string, files: string[]): void;
+	markDownloadFailed(postId: string, error: string): void;
+	removeDownload(postId: string): void;
+	requeueInterrupted(): number;
+}
+
 /**
  * Deep Store: one module owns the creator + seen-ledger lifecycle.
  *
@@ -19,7 +44,7 @@ export interface SeenPost {
  * retryable. `commit(...)` records completion and owns JSON/upsert/time.
  * Poll owns ordering (extract → push → commit); the Store owns ledger rules.
  */
-export interface Store {
+export interface Store extends DownloadQueue {
 	listCreators(): Creator[];
 	addCreator(url: string): void;
 	removeCreator(url: string): void;
@@ -47,6 +72,7 @@ export function openStore(path: string, opts: StoreOptions = {}): Store {
 	db.exec(`
 CREATE TABLE IF NOT EXISTS creators(url TEXT PRIMARY KEY, last_check INTEGER);
 CREATE TABLE IF NOT EXISTS seen(post_id TEXT PRIMARY KEY, title TEXT, yt_ids TEXT, created_at INTEGER);
+CREATE TABLE IF NOT EXISTS downloads(post_id TEXT PRIMARY KEY, url TEXT NOT NULL, title TEXT NOT NULL, status TEXT NOT NULL, files TEXT NOT NULL, error TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
 `);
 
 	const listCreatorsStmt = db.prepare("SELECT url, last_check FROM creators");
@@ -60,8 +86,53 @@ CREATE TABLE IF NOT EXISTS seen(post_id TEXT PRIMARY KEY, title TEXT, yt_ids TEX
 	const getSeenStmt = db.prepare(
 		"SELECT post_id, title, yt_ids FROM seen ORDER BY created_at DESC, rowid DESC LIMIT ?",
 	);
+	const enqueueStmt = db.prepare(
+		"INSERT OR IGNORE INTO downloads(post_id, url, title, status, files, error, created_at, updated_at) VALUES (?, ?, ?, 'queued', '[]', NULL, ?, ?)",
+	);
+	const listDownloadsStmt = db.prepare("SELECT * FROM downloads ORDER BY created_at DESC, rowid DESC LIMIT ?");
+	const queuedDownloadsStmt = db.prepare("SELECT * FROM downloads WHERE status = 'queued' ORDER BY created_at, rowid");
+	const retryDownloadStmt = db.prepare(
+		"UPDATE downloads SET status = 'queued', error = NULL, updated_at = ? WHERE post_id = ? AND status IN ('queued', 'failed')",
+	);
+	const setStatusStmt = db.prepare("UPDATE downloads SET status = ?, files = ?, error = ?, updated_at = ? WHERE post_id = ?");
+	const removeDownloadStmt = db.prepare("DELETE FROM downloads WHERE post_id = ?");
+	const requeueInterruptedStmt = db.prepare(
+		"UPDATE downloads SET status = 'queued', updated_at = ? WHERE status = 'downloading'",
+	);
+	const toItem = (row: Record<string, unknown>): DownloadItem => ({
+		...(row as unknown as DownloadItem),
+		files: JSON.parse(row.files as string) as string[],
+	});
 
 	return {
+		enqueue(postId: string, url: string, title: string): void {
+			const t = now();
+			enqueueStmt.run(postId, url, title, t, t);
+		},
+		listDownloads(limit = 200): DownloadItem[] {
+			return (listDownloadsStmt.all(limit) as Record<string, unknown>[]).map(toItem);
+		},
+		queuedDownloads(): DownloadItem[] {
+			return (queuedDownloadsStmt.all() as Record<string, unknown>[]).map(toItem);
+		},
+		retryDownload(postId: string): boolean {
+			return Number(retryDownloadStmt.run(now(), postId).changes) > 0;
+		},
+		markDownloading(postId: string): void {
+			setStatusStmt.run("downloading", "[]", null, now(), postId);
+		},
+		markDownloaded(postId: string, files: string[]): void {
+			setStatusStmt.run("done", JSON.stringify(files), null, now(), postId);
+		},
+		markDownloadFailed(postId: string, error: string): void {
+			setStatusStmt.run("failed", "[]", error, now(), postId);
+		},
+		removeDownload(postId: string): void {
+			removeDownloadStmt.run(postId);
+		},
+		requeueInterrupted(): number {
+			return Number(requeueInterruptedStmt.run(now()).changes);
+		},
 		listCreators(): Creator[] {
 			return listCreatorsStmt.all() as unknown as Creator[];
 		},
@@ -100,8 +171,69 @@ export function createMemoryStore(opts: StoreOptions = {}): Store {
 	// conflicts update title/yt_ids but not recency). seq breaks ties newest-first.
 	const seen = new Map<string, { title: string; yt_ids: string[]; created_at: number; seq: number }>();
 	let seq = 0;
+	const downloads = new Map<string, DownloadItem & { seq: number }>();
+	const copy = ({ seq: _seq, ...item }: DownloadItem & { seq: number }): DownloadItem => ({ ...item, files: [...item.files] });
+	const update = (postId: string, patch: Partial<DownloadItem>): void => {
+		const item = downloads.get(postId);
+		if (item) Object.assign(item, patch, { updated_at: now() });
+	};
 
 	return {
+		enqueue(postId: string, url: string, title: string): void {
+			if (downloads.has(postId)) return;
+			const t = now();
+			downloads.set(postId, {
+				post_id: postId,
+				url,
+				title,
+				status: "queued",
+				files: [],
+				error: null,
+				created_at: t,
+				updated_at: t,
+				seq: seq++,
+			});
+		},
+		listDownloads(limit = 200): DownloadItem[] {
+			return [...downloads.values()]
+				.sort((a, b) => b.created_at - a.created_at || b.seq - a.seq)
+				.slice(0, limit)
+				.map(copy);
+		},
+		queuedDownloads(): DownloadItem[] {
+			return [...downloads.values()]
+				.filter((d) => d.status === "queued")
+				.sort((a, b) => a.created_at - b.created_at || a.seq - b.seq)
+				.map(copy);
+		},
+		retryDownload(postId: string): boolean {
+			const item = downloads.get(postId);
+			if (!item || (item.status !== "queued" && item.status !== "failed")) return false;
+			update(postId, { status: "queued", error: null });
+			return true;
+		},
+		markDownloading(postId: string): void {
+			update(postId, { status: "downloading", files: [], error: null });
+		},
+		markDownloaded(postId: string, files: string[]): void {
+			update(postId, { status: "done", files: [...files], error: null });
+		},
+		markDownloadFailed(postId: string, error: string): void {
+			update(postId, { status: "failed", files: [], error });
+		},
+		removeDownload(postId: string): void {
+			downloads.delete(postId);
+		},
+		requeueInterrupted(): number {
+			let n = 0;
+			for (const item of downloads.values()) {
+				if (item.status === "downloading") {
+					update(item.post_id, { status: "queued" });
+					n += 1;
+				}
+			}
+			return n;
+		},
 		listCreators(): Creator[] {
 			return [...creators.entries()].map(([url, last_check]) => ({ url, last_check }));
 		},

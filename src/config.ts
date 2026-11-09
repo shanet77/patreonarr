@@ -19,12 +19,21 @@ export interface TAConfig {
 	autostart: boolean;
 }
 
+export interface DownloadConfig {
+	dir: string;
+	template: string;
+	autostart: boolean;
+}
+
+export const DEFAULT_DOWNLOAD_TEMPLATE = "%(uploader)s/%(upload_date)s %(title)s [%(id)s].%(ext)s";
+
 export interface Config {
 	port: number;
 	pollMin: number;
 	dbPath: string;
 	cookiesPath: string;
 	ta: TAConfig;
+	download: DownloadConfig;
 }
 
 /** Parse an int env var, falling back to `fallback` when absent or garbage. */
@@ -44,6 +53,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 			token: env.TA_API_TOKEN ?? "",
 			// README: false = queue only (default); only "true" opts in.
 			autostart: (env.TA_AUTOSTART ?? "false").toLowerCase() === "true",
+		},
+		download: {
+			dir: env.DOWNLOAD_DIR || "/downloads",
+			template: env.DOWNLOAD_TEMPLATE || DEFAULT_DOWNLOAD_TEMPLATE,
+			autostart: (env.DOWNLOAD_AUTOSTART ?? "false").toLowerCase() === "true",
 		},
 	};
 }

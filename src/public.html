@@ -150,6 +150,11 @@
     color: var(--sage);
     border: 1px solid #3a4f3f;
   }
+  .dl-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .dl-head h2 { margin-bottom: 4px; }
+  .dl-actions { display: flex; gap: 6px; margin-top: 8px; }
+  .dl-actions button { padding: 5px 12px; font-size: 12.5px; }
+  .pill.failed { color: var(--coral); }
   .pill.none { background: transparent; color: var(--muted); border-color: var(--line); font-weight: 500; }
   .empty {
     color: var(--muted);
@@ -222,6 +227,13 @@
   <p class="sub" id="creatorCount"></p>
   <ul class="clean" id="list"></ul>
 
+  <div class="dl-head">
+    <h2>Downloads</h2>
+    <button class="primary" id="dlAllBtn" style="padding:6px 12px;font-size:12.5px" hidden>Download all</button>
+  </div>
+  <p class="sub" id="dlSub">Patreon-hosted videos wait here until you start them.</p>
+  <ul class="clean" id="downloads"></ul>
+
   <h2>Recent posts</h2>
   <p class="sub">Latest pickups from your creators.</p>
   <ul class="clean" id="seen"></ul>
@@ -273,9 +285,11 @@
     return r.json().catch(() => ({}));
   }
   async function refresh() {
-    let creators = [], seen = [];
+    let creators = [], seen = [], dl = { running: false, items: [] };
     try { creators = await api("GET", "/api/creators"); } catch {}
     try { seen = await api("GET", "/api/seen"); } catch {}
+    try { dl = await api("GET", "/api/downloads"); } catch {}
+    renderDownloads(dl);
     $("creatorCount").textContent = creators.length
       ? creators.length + (creators.length === 1 ? " creator" : " creators") + " followed"
       : "";
@@ -297,6 +311,49 @@
         (links ? `<div class="post-m">${links}</div>` : "") + `</li>`;
     }).join("") : `<li class="empty">No posts picked up yet. They will appear here after the next poll.</li>`;
   }
+  const dlLabel = { queued: "queued", downloading: "downloading", done: "downloaded", failed: "failed" };
+  let dlTimer;
+  function renderDownloads({ running, items }) {
+    const queued = items.filter(i => i.status === "queued").length;
+    $("dlAllBtn").hidden = !queued || running;
+    $("dlAllBtn").textContent = `Download all (${queued})`;
+    $("dlSub").textContent = running
+      ? "Downloading now. This list refreshes on its own."
+      : "Patreon-hosted videos wait here until you start them.";
+    $("downloads").innerHTML = items.length ? items.slice(0, 50).map(i => {
+      const meta = i.status === "done"
+        ? i.files.map(f => esc(f.split("/").pop())).join(", ")
+        : i.status === "failed" ? esc(i.error || "") : "";
+      const start = i.status === "queued" ? "Download" : i.status === "failed" ? "Retry" : "";
+      const actions = (start ? `<button class="primary" data-start="${esc(i.post_id)}">${start}</button>` : "") +
+        (i.status !== "downloading" ? `<button class="ghost" data-remove="${esc(i.post_id)}">Remove</button>` : "");
+      return `<li class="post"><span class="post-t"><a href="${esc(i.url)}" target="_blank" rel="noopener" style="color:inherit">${esc(i.title || i.post_id)}</a></span>` +
+        `<span class="pill ${i.status === "failed" ? "failed" : i.status === "done" ? "" : "none"}">${dlLabel[i.status] || esc(i.status)}</span>` +
+        (meta ? `<div class="post-m">${meta}</div>` : "") +
+        (actions ? `<div class="dl-actions">${actions}</div>` : "") + `</li>`;
+    }).join("") : `<li class="empty">No Patreon-hosted videos found yet.</li>`;
+    clearTimeout(dlTimer);
+    if (running) dlTimer = setTimeout(refresh, 4000);
+  }
+  async function startDownloads(postId) {
+    try {
+      await api("POST", "/api/downloads/start", postId ? JSON.stringify({ post_id: postId }) : undefined);
+      toast(postId ? "Download started" : "Downloads started");
+      setTimeout(refresh, 800);
+    } catch (err) { toast(String(err.message || err)); }
+  }
+  $("dlAllBtn").onclick = () => startDownloads();
+  $("downloads").addEventListener("click", async e => {
+    const start = e.target.closest("[data-start]");
+    const remove = e.target.closest("[data-remove]");
+    if (start) { start.disabled = true; await startDownloads(start.dataset.start); }
+    if (remove) {
+      remove.disabled = true;
+      await api("DELETE", "/api/downloads?post_id=" + encodeURIComponent(remove.dataset.remove));
+      toast("Removed from downloads");
+      refresh();
+    }
+  });
   $("list").addEventListener("click", async e => {
     const b = e.target.closest("[data-del]");
     if (!b) return;

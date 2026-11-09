@@ -1,4 +1,5 @@
 /data
+/downloads
 node_modules/
 dist/
 .env

@@ -1,7 +1,7 @@
 {
   "name": "patreonarr-bridge",
   "version": "0.1.0",
-  "description": "Poll Patreon memberships, extract embedded YouTube IDs, push to TubeArchivist",
+  "description": "Poll Patreon memberships, push embedded YouTube IDs to TubeArchivist, queue Patreon-hosted videos for download",
   "type": "module",
   "engines": { "node": ">=24" },
   "scripts": {

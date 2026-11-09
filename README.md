@@ -1,7 +1,8 @@
 # patreonarr
 
-Sidecar that watches your Patreon memberships and queues new videos in
-[TubeArchivist](https://www.tubearchivist.com/) for download.
+Sidecar that watches your Patreon memberships, queues embedded YouTube videos in
+[TubeArchivist](https://www.tubearchivist.com/), and queues Patreon-hosted
+videos for download straight to disk.
 
 TubeArchivist downloads from YouTube (based on yt-dlp). Many Patreon creators embed (often
 unlisted) YouTube videos in their posts, so this bridge polls your Patreon
@@ -10,10 +11,15 @@ download queue via its API. TubeArchivist then handles downloading, indexing,
 and playback like any other video.
 Potentially in the future will propose this as a feature directly within TubeArchivist or spin an entirely standalone application.
 ```
-patreon (cookies) → bridge → YouTube IDs → TubeArchivist /api/download/
+patreon (cookies) → bridge ─┬─ YouTube IDs ──────────→ TubeArchivist /api/download/
+                            └─ Patreon-hosted video ─→ download queue → yt-dlp → DOWNLOAD_DIR
 ```
 
-Native Patreon-hosted videos (not YouTube embeds) are skipped. Roadmap will include this feature.
+Videos uploaded directly to Patreon (served from Patreon's Mux CDN, no DRM) and
+other non-YouTube embeds such as Vimeo can't go through TubeArchivist, which
+only knows YouTube IDs. The bridge keeps its own download queue for those and
+fetches them with yt-dlp into `DOWNLOAD_DIR`, ready for Jellyfin/Plex or any
+file-based library.
 
 ## Setup
 
@@ -93,15 +99,16 @@ systemctl --user start patreonarr-bridge.service
 
 `patreonarr-bridge.container` joins the existing `tubearchivist.network`,
 puts the UI on port `8095` (change `PublishPort` if taken), and restarts with
-the service. Paste cookies and add creators at `http://host:8095`.
+the service. Give it a `Volume=<host media dir>:/downloads:Z` line so
+Patreon-hosted videos land somewhere persistent. Paste cookies and add creators at `http://host:8095`.
 
 ## How it works
 
 Every `POLL_INTERVAL_MIN` minutes (plus on startup and on demand via
 **poll now**), the bridge walks each creator, lists new posts with yt-dlp's
-Patreon extractor, and checks each unseen post for embedded YouTube URLs
-(watch/shorts/live/embed/`youtu.be`). New IDs are recorded in SQLite and
-POSTed to TubeArchivist:
+Patreon extractor, and inspects each unseen post. Embedded YouTube URLs
+(watch/shorts/live/embed/`youtu.be`) are recorded in SQLite and POSTed to
+TubeArchivist:
 
 ```
 POST {TA_HOST}/api/download/?autostart=<true|false>
@@ -109,8 +116,23 @@ POST {TA_HOST}/api/download/?autostart=<true|false>
 ```
 
 `TA_AUTOSTART=false` (the default) queues videos for manual download in the
-TA UI. Set it to `true` to download immediately. Posts with no embeds are
-logged and skipped; already-seen posts are never re-pushed.
+TA UI. Set it to `true` to download immediately.
+
+Patreon-hosted video (and any other non-YouTube media yt-dlp resolves in the
+post) goes into the bridge's download queue, mirroring TA's queue-first
+default. Start downloads from the **Downloads** section of the UI (one at a
+time or **Download all**), or set `DOWNLOAD_AUTOSTART=true` to drain the queue
+after every poll. Downloads run one at a time with yt-dlp into `DOWNLOAD_DIR`
+using `DOWNLOAD_TEMPLATE`, by default
+`<creator>/<YYYYMMDD> <title> [<post id>].mp4`, with title/date metadata
+embedded. YouTube entries are filtered out so TA stays their only owner.
+
+Adding a creator queues their whole back catalog of Patreon-hosted video, so
+size `DOWNLOAD_DIR` accordingly before hitting **Download all**, or remove
+entries you don't want. Failed downloads keep yt-dlp's error and can be
+retried; a download cut off by a restart is requeued on startup. A failed TA
+push leaves the post unseen so the next poll retries it. Posts with no video
+are logged and skipped; already-seen posts are never re-processed.
 
 ## Configuration
 
@@ -123,6 +145,9 @@ logged and skipped; already-seen posts are never re-pushed.
 | `PORT` | `8080` | Bridge UI/API port |
 | `DB_PATH` | `/data/bridge.db` | SQLite file (creators, seen posts) |
 | `COOKIES_PATH` | `/data/patreon-cookies.txt` | Patreon cookies file |
+| `DOWNLOAD_DIR` | `/downloads` | Where Patreon-hosted videos are saved |
+| `DOWNLOAD_AUTOSTART` | `false` | `true` = download queued videos after each poll, `false` = queue only |
+| `DOWNLOAD_TEMPLATE` | `%(uploader)s/%(upload_date)s %(title)s [%(id)s].%(ext)s` | yt-dlp output template, relative to `DOWNLOAD_DIR` |
 
 ## API
 
@@ -132,7 +157,10 @@ logged and skipped; already-seen posts are never re-pushed.
 | `GET` | `/api/health` | Health check |
 | `GET` / `POST` | `/api/creators` | List / add a creator feed URL |
 | `DELETE` | `/api/creators?url=` | Remove a creator |
-| `GET` | `/api/seen` | Recently scanned posts and found video IDs |
+| `GET` | `/api/seen` | Recently scanned posts and pushed video IDs |
+| `GET` | `/api/downloads` | Download queue (`queued`/`downloading`/`done`/`failed`) and whether it is running |
+| `POST` | `/api/downloads/start` | Download everything queued, or `{"post_id": "..."}` to start/retry one |
+| `DELETE` | `/api/downloads?post_id=` | Drop an entry from the queue |
 | `POST` | `/api/poll` | Trigger a poll (returns immediately) |
 | `POST` | `/api/cookies` | Upload `cookies.txt` content |
 
@@ -141,5 +169,5 @@ logged and skipped; already-seen posts are never re-pushed.
 ```bash
 npm install
 npm test    # tsc + node --test, pure parsers in *.test.ts
-npm run dev # watch mode (needs yt-dlp on PATH for real polls)
+npm run dev # watch mode (needs yt-dlp and ffmpeg on PATH for real polls)
 ```

@@ -20,7 +20,7 @@ function makeDeps(overrides: Omit<Partial<PollDeps>, "store"> = {}): Omit<PollDe
 		logs,
 		feed: {
 			listPosts: async () => [{ id: "p1", title: "Post 1", url: "https://www.patreon.com/posts/p1" }],
-			extractIds: async () => ({ ids: ["dQw4w9WgXcQ"], title: "Vid" }),
+			inspect: async () => ({ ids: ["dQw4w9WgXcQ"], title: "Vid", direct: false }),
 		},
 		pusher: {
 			push: async (ids) => {
@@ -67,12 +67,13 @@ test("no embeds commit without push but still touch", async () => {
 	const d = makeDeps({
 		feed: {
 			listPosts: async () => [{ id: "p1", title: "Post 1", url: "https://www.patreon.com/posts/p1" }],
-			extractIds: async () => ({ ids: [], title: "" }),
+			inspect: async () => ({ ids: [], title: "", direct: false }),
 		},
 	});
 	const summary = await pollOnce(d);
 	assert.equal(summary.noEmbedPosts, 1);
 	assert.equal(d.pushed.length, 0);
+	assert.deepEqual(d.store.listDownloads(), []);
 	assert.deepEqual(d.store.getSeen(), [{ post_id: "p1", title: "Post 1", yt_ids: [] }]);
 	assert.ok((d.store.listCreators()[0].last_check ?? 0) > 0);
 });
@@ -81,9 +82,9 @@ test("already-seen posts never hit extract or push", async () => {
 	const d = makeDeps();
 	d.store.commit("p1", "Vid", ["dQw4w9WgXcQ"]);
 	let extracted = 0;
-	d.feed.extractIds = async () => {
+	d.feed.inspect = async () => {
 		extracted += 1;
-		return { ids: ["dQw4w9WgXcQ"], title: "Vid" };
+		return { ids: ["dQw4w9WgXcQ"], title: "Vid", direct: false };
 	};
 	const summary = await pollOnce(d);
 	assert.equal(summary.skippedSeen, 1);
@@ -98,7 +99,7 @@ test("listPosts failure skips creator without touchChecked", async () => {
 			listPosts: async () => {
 				throw new Error("auth");
 			},
-			extractIds: async () => ({ ids: [], title: "" }),
+			inspect: async () => ({ ids: [], title: "", direct: false }),
 		},
 	});
 	const summary = await pollOnce(d);
@@ -118,4 +119,42 @@ test("cookies missing skips whole poll", async () => {
 	assert.equal(listed, false);
 	assert.equal(summary.creators, 0);
 	assert.match(d.logs[0], /no cookies file/);
+});
+
+test("patreon-hosted video is queued, not downloaded or pushed", async () => {
+	const d = makeDeps();
+	d.feed.inspect = async () => ({ ids: [], title: "Native", direct: true });
+	const summary = await pollOnce(d);
+	assert.equal(summary.queuedDownloads, 1);
+	assert.equal(summary.pushedPosts, 0);
+	assert.equal(d.pushed.length, 0);
+	assert.deepEqual(
+		d.store.listDownloads().map(({ post_id, url, title, status }) => ({ post_id, url, title, status })),
+		[{ post_id: "p1", url: "https://www.patreon.com/posts/p1", title: "Native", status: "queued" }],
+	);
+	assert.equal(d.store.claim("p1"), false);
+	assert.ok((d.store.listCreators()[0].last_check ?? 0) > 0);
+});
+
+test("post with native media and youtube embeds pushes and queues", async () => {
+	const d = makeDeps();
+	d.feed.inspect = async () => ({ ids: ["dQw4w9WgXcQ"], title: "Mixed", direct: true });
+	const summary = await pollOnce(d);
+	assert.equal(summary.pushedPosts, 1);
+	assert.equal(summary.queuedDownloads, 1);
+	assert.deepEqual(d.pushed, [["dQw4w9WgXcQ"]]);
+	assert.equal(d.store.listDownloads().length, 1);
+});
+
+test("failed push on a mixed post queues nothing so the retry stays whole", async () => {
+	const d = makeDeps();
+	d.feed.inspect = async () => ({ ids: ["dQw4w9WgXcQ"], title: "Mixed", direct: true });
+	d.pusher.push = async () => {
+		throw new Error("TA down");
+	};
+	const summary = await pollOnce(d);
+	assert.equal(summary.failedPushes, 1);
+	assert.equal(summary.queuedDownloads, 0);
+	assert.deepEqual(d.store.listDownloads(), []);
+	assert.equal(d.store.claim("p1"), true);
 });
